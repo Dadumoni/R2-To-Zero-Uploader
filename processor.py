@@ -1,10 +1,9 @@
 from pathlib import Path
 from utils.logger import log
 from utils.media import make_rename, generate_smart_thumbnail, get_video_duration
-from db.mongo import calculate_file_hash, is_duplicate_hash, save_file_hash
+from db.mongo import calculate_file_hash, mongo_check_duplicate, mongo_save_video_hash
 from db.supabase_db import (
     supabase_get_next_slug,
-    supabase_check_duplicate,
     supabase_insert_video,
 )
 from storage.r2 import (
@@ -26,7 +25,10 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
     log(f"R2 KEY     : {key}")
     log("=" * 65)
 
+    # Generate 12-15 char random slug with letters, digits, and underscore (_)
     slug = supabase_get_next_slug()
+    log(f"Assigned Slug: {slug}")
+
     # Video rename before uploading (using original extension)
     new_name = make_rename(orig_ext)
     local_file = temp_dir / new_name
@@ -43,11 +45,8 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
         log(f"File Hash: {file_hash}")
         log(f"File Size: {file_size / 1024 / 1024:.2f} MB, Duration: {duration:.2f}s")
 
-        # Step 3: Tagda Duplicate Check (Supabase + MongoDB)
-        is_dup, reason = supabase_check_duplicate(file_hash, file_size, duration)
-        if not is_dup and is_duplicate_hash(file_hash):
-            is_dup = True
-            reason = "Matched in local MongoDB cache"
+        # Step 3: Tagda Duplicate Check using MongoDB (SHA-256 Hash + Size & Duration)
+        is_dup, reason = mongo_check_duplicate(file_hash, file_size, duration)
 
         if is_dup:
             log(f"⚠ [DUPLICATE DETECTED] {reason}")
@@ -79,7 +78,7 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
         zs_embed, zs_video = upload_zerostorage(local_file)
         log(f"✔ ZS Video: {zs_video}")
 
-        # Step 6: Save record in Supabase all_videos_db
+        # Step 6: Save record in Supabase all_videos_db (NO file_hash saved in Supabase)
         record = {
             "slug":        slug,
             "title":       new_name,
@@ -88,14 +87,13 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
             "zerostorage": zs_embed,
             "abyss":       abyss_url,
             "anonmp4":     anon_url,
-            "file_hash":   file_hash,
-            "file_size":   file_size,
-            "duration":    duration,
         }
         supabase_insert_video(record)
-        save_file_hash(file_hash, slug, new_name)
 
-        # Step 7: Cleanup local file & remove original from R2 watch folder
+        # Step 7: Save file hash and metadata in MongoDB for future deduplication
+        mongo_save_video_hash(file_hash, slug, new_name, file_size, duration)
+
+        # Step 8: Cleanup local file & remove original from R2 watch folder
         if local_file.exists():
             local_file.unlink()
 

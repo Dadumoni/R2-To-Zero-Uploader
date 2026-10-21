@@ -1,3 +1,5 @@
+import random
+import string
 from supabase import create_client, Client
 from config import SUPABASE_URL, SUPABASE_KEY
 from utils.logger import log
@@ -15,56 +17,41 @@ def get_supabase_client() -> Client:
 def supabase_init_table():
     client = get_supabase_client()
     try:
-        # Check table access
         res = client.table("all_videos_db").select("id").limit(1).execute()
         log("Supabase table 'all_videos_db' connected and ready.")
     except Exception as e:
         log(f"Warning connecting to Supabase table 'all_videos_db': {e}")
 
+def generate_random_slug(length: int = None) -> str:
+    """
+    Generates a 12-15 character random slug containing letters (a-z, A-Z), numbers (0-9), and underscore (_).
+    Example: hjb8SNrKg_s8enRo
+    """
+    if length is None:
+        length = random.randint(12, 15)
+    charset = string.ascii_letters + string.digits + "_"
+    return "".join(random.choices(charset, k=length))
+
 def supabase_get_next_slug() -> str:
-    client = get_supabase_client()
-    try:
-        res = client.table("all_videos_db").select("slug").order("id", desc=True).limit(1).execute()
-        rows = res.data or []
-        if not rows:
-            return "vid000000000001"
-        last = rows[0]["slug"]
-        num = int(str(last).replace("vid", "")) + 1
-        return f"vid{num:012d}"
-    except Exception as e:
-        log(f"Error fetching last slug from Supabase: {e}, falling back to vid000000000001")
-        return "vid000000000001"
-
-def supabase_check_duplicate(file_hash: str, file_size: int = None, duration: float = None) -> tuple[bool, str]:
     """
-    Robust multi-layer duplicate check:
-    1. Exact SHA-256 file hash match.
-    2. File size + duration match (handles re-encoded/re-named copies with matching length and size).
+    Generates a unique 12-15 character random slug and ensures no collision in Supabase.
     """
     client = get_supabase_client()
-    try:
-        # Layer 1: Check SHA256 Hash
-        if file_hash:
-            res_hash = client.table("all_videos_db").select("slug, title, file_hash").eq("file_hash", file_hash).limit(1).execute()
-            if res_hash.data and len(res_hash.data) > 0:
-                match = res_hash.data[0]
-                return True, f"Exact SHA256 Hash matched with slug '{match.get('slug')}' ({match.get('title')})"
-
-        # Layer 2: Check matching File Size & Duration (within 0.1s tolerance)
-        if file_size and file_size > 0 and duration and duration > 0:
-            res_size = client.table("all_videos_db").select("slug, title, file_size, duration").eq("file_size", file_size).execute()
-            if res_size.data:
-                for row in res_size.data:
-                    row_dur = row.get("duration")
-                    if row_dur is not None and abs(float(row_dur) - float(duration)) < 0.1:
-                        return True, f"File size ({file_size} B) and duration ({duration:.2f}s) matched with slug '{row.get('slug')}' ({row.get('title')})"
-
-    except Exception as e:
-        log(f"[Supabase Duplicate Check Warning] {e}")
-
-    return False, ""
+    for _ in range(10):
+        slug = generate_random_slug()
+        try:
+            res = client.table("all_videos_db").select("id").eq("slug", slug).limit(1).execute()
+            if not res.data:
+                return slug
+        except Exception:
+            return slug
+    return generate_random_slug(15)
 
 def supabase_insert_video(record: dict):
+    """
+    Saves video details to Supabase all_videos_db table.
+    Note: file_hash is handled separately in MongoDB.
+    """
     client = get_supabase_client()
     payload = {
         "slug":        record.get("slug"),
@@ -74,11 +61,7 @@ def supabase_insert_video(record: dict):
         "zerostorage": record.get("zerostorage"),
         "abyss":       record.get("abyss"),
         "anonmp4":     record.get("anonmp4"),
-        "file_hash":   record.get("file_hash"),
-        "file_size":   record.get("file_size"),
-        "duration":    record.get("duration"),
     }
-    # Filter out None values to respect defaults if any
     payload = {k: v for k, v in payload.items() if v is not None}
     
     res = client.table("all_videos_db").insert(payload).execute()
