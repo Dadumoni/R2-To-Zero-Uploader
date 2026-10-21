@@ -1,0 +1,10 @@
+boto3
+botocore
+python-dotenv
+playwright
+pymongo
+flask
+requests
+requests-toolbelt
+supabase
+Pillow
