@@ -1,3 +1,4 @@
+import traceback
 from pathlib import Path
 from utils.logger import log
 from utils.media import make_rename, generate_smart_thumbnail, get_video_duration
@@ -102,7 +103,7 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
         return True
 
     except Exception as e:
-        log(f"✖ FAILED: {e}")
+        log(f"✖ FAILED: {e}\n{traceback.format_exc()}")
         if local_file.exists():
             local_file.unlink()
         return False

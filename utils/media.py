@@ -34,7 +34,6 @@ def get_video_info(video_path: Path) -> dict:
         width = int(stream.get("width") or 1920)
         height = int(stream.get("height") or 1080)
 
-        # Duration can be in stream or format
         dur_str = stream.get("duration") or fmt.get("duration")
         duration = float(dur_str) if dur_str else 0.0
 
@@ -50,7 +49,6 @@ def get_video_info(video_path: Path) -> dict:
         }
     except Exception as e:
         log(f"Error reading video metadata via ffprobe: {e}")
-        # Fallback values
         return {
             "width": 1920,
             "height": 1080,
@@ -83,22 +81,19 @@ def fit_image_with_blurred_bg(img: Image.Image, target_w: int, target_h: int) ->
     """
     Places image in target dimensions with blurred background fill (similar to Reference Image 3).
     """
-    # Create blurred background
+    img = img.convert("RGB")
     bg = ImageOps.fit(img, (target_w, target_h), method=Image.Resampling.LANCZOS)
     bg = bg.filter(ImageFilter.GaussianBlur(25))
 
-    # Darken background slightly
     dimmer = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 80))
     bg.paste(dimmer, (0, 0), dimmer)
 
-    # Scale original image maintaining aspect ratio
     orig_w, orig_h = img.size
     ratio = min(target_w / orig_w, target_h / orig_h)
     new_w = max(1, int(orig_w * ratio))
     new_h = max(1, int(orig_h * ratio))
     fg = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-    # Paste centered
     paste_x = (target_w - new_w) // 2
     paste_y = (target_h - new_h) // 2
     bg.paste(fg, (paste_x, paste_y))
@@ -119,7 +114,6 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
     output_path = temp_dir / f"{slug}_composite_thumb.jpg"
     log(f"[Thumbnail] Detected Resolution: {info['width']}x{info['height']} (Ratio: {ratio:.2f}), Duration: {duration:.2f}s")
 
-    # If duration is 0, default to 30s to allow test extraction
     effective_dur = duration if duration > 1.0 else 30.0
 
     # =========================================================================
@@ -127,10 +121,11 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
     # =========================================================================
     if ratio < 0.8:
         log("[Thumbnail] Mode: 9:16 Ratio -> Creating 3-Panel Side-by-Side Thumbnail (16:9)")
+        part = effective_dur / 3.0
         timestamps = [
-            0.1 * (effective_dur / 3.0),
-            (effective_dur / 3.0) + 0.1 * (effective_dur / 3.0),
-            (2.0 * effective_dur / 3.0) + 0.1 * (effective_dur / 3.0),
+            0.1 * part,
+            part + 0.1 * part,
+            2.0 * part + 0.1 * part,
         ]
 
         frame_imgs = []
@@ -138,16 +133,15 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             frame_file = temp_dir / f"{slug}_f916_{i}.jpg"
             if extract_frame_at(video_path, ts, frame_file):
                 try:
-                    frame_imgs.append(Image.open(frame_file))
+                    frame_imgs.append(Image.open(frame_file).convert("RGB"))
                 except Exception:
                     pass
 
-        # Fallback if frames couldn't be extracted
         if not frame_imgs:
             frame_file = temp_dir / f"{slug}_fallback.jpg"
             extract_frame_at(video_path, 0.0, frame_file)
             if frame_file.exists():
-                frame_imgs = [Image.open(frame_file)] * 3
+                frame_imgs = [Image.open(frame_file).convert("RGB")] * 3
 
         canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=(0, 0, 0))
         divider_w = 8
@@ -160,10 +154,10 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             x_pos = idx * (col_w + divider_w)
             canvas.paste(cropped, (x_pos, 0))
 
-        # Draw black border dividers like Reference Image 1
+        # Explicitly ensure clean black divider lines using 2-point tuple coordinates [(x0, y0), (x1, y1)]
         draw = ImageDraw.Draw(canvas)
-        draw.rectangle([col_w, 0, col_w + divider_w, col_h], fill=(0, 0, 0))
-        draw.rectangle([2 * col_w + divider_w, 2 * col_w + 2 * divider_w, col_h], fill=(0, 0, 0))
+        draw.rectangle([(col_w, 0), (col_w + divider_w, col_h)], fill=(0, 0, 0))
+        draw.rectangle([(2 * col_w + divider_w, 0), (2 * col_w + 2 * divider_w, col_h)], fill=(0, 0, 0))
 
         canvas.save(output_path, "JPEG", quality=95)
         log(f"[Thumbnail] 9:16 Composite generated: {output_path.name}")
@@ -187,7 +181,7 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             frame_file = temp_dir / f"{slug}_f169_{i}.jpg"
             if extract_frame_at(video_path, ts, frame_file):
                 try:
-                    frame_imgs.append(Image.open(frame_file))
+                    frame_imgs.append(Image.open(frame_file).convert("RGB"))
                 except Exception:
                     pass
 
@@ -195,7 +189,7 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             frame_file = temp_dir / f"{slug}_fallback.jpg"
             extract_frame_at(video_path, 0.0, frame_file)
             if frame_file.exists():
-                frame_imgs = [Image.open(frame_file)] * 4
+                frame_imgs = [Image.open(frame_file).convert("RGB")] * 4
 
         canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=(0, 0, 0))
         divider = 8
@@ -214,10 +208,10 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             cropped = ImageOps.fit(img, (cell_w, cell_h), method=Image.Resampling.LANCZOS)
             canvas.paste(cropped, coords[idx])
 
-        # Draw grid dividing cross
+        # Draw grid dividing cross with 2-point tuple coordinates [(x0, y0), (x1, y1)]
         draw = ImageDraw.Draw(canvas)
-        draw.rectangle([cell_w, 0, cell_w + divider, CANVAS_HEIGHT], fill=(0, 0, 0))
-        draw.rectangle([0, cell_h, CANVAS_WIDTH, cell_h + divider], fill=(0, 0, 0))
+        draw.rectangle([(cell_w, 0), (cell_w + divider, CANVAS_HEIGHT)], fill=(0, 0, 0))
+        draw.rectangle([(0, cell_h), (CANVAS_WIDTH, cell_h + divider)], fill=(0, 0, 0))
 
         canvas.save(output_path, "JPEG", quality=95)
         log(f"[Thumbnail] 16:9 Composite generated: {output_path.name}")
@@ -243,7 +237,7 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             frame_file = temp_dir / f"{slug}_fother_{i}.jpg"
             if extract_frame_at(video_path, ts, frame_file):
                 try:
-                    frame_imgs.append(Image.open(frame_file))
+                    frame_imgs.append(Image.open(frame_file).convert("RGB"))
                 except Exception:
                     pass
 
@@ -251,9 +245,8 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             frame_file = temp_dir / f"{slug}_fallback.jpg"
             extract_frame_at(video_path, 0.0, frame_file)
             if frame_file.exists():
-                frame_imgs = [Image.open(frame_file)] * 6
+                frame_imgs = [Image.open(frame_file).convert("RGB")] * 6
 
-        # Sleek dark background matching Reference Image 3
         bg_color = (20, 24, 33)
         canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=bg_color)
 
@@ -272,15 +265,12 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
             (pad_x + 2 * (card_w + gap), pad_y + 1 * (card_h + gap)),
         ]
 
-        draw = ImageDraw.Draw(canvas)
-
         for idx in range(6):
             img = frame_imgs[idx % len(frame_imgs)]
             card = fit_image_with_blurred_bg(img, card_w, card_h)
 
-            # Draw sleek white border around card
             card_draw = ImageDraw.Draw(card)
-            card_draw.rectangle([0, 0, card_w - 1, card_h - 1], outline=(255, 255, 255, 220), width=3)
+            card_draw.rectangle([(0, 0), (card_w - 1, card_h - 1)], outline=(255, 255, 255), width=3)
 
             canvas.paste(card, positions[idx])
 
