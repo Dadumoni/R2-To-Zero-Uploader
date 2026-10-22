@@ -47,6 +47,35 @@ def supabase_get_next_slug() -> str:
             return slug
     return generate_random_slug(15)
 
+def supabase_check_duplicate(file_hash: str, file_size: int = None, duration: float = None) -> tuple[bool, str]:
+    """
+    Checks Supabase database for duplicates:
+    1. Exact SHA-256 file_hash check.
+    2. File size and duration match (within 0.15s tolerance).
+    """
+    client = get_supabase_client()
+    try:
+        # Layer 1: Check SHA256 Hash
+        if file_hash:
+            res_hash = client.table("all_videos_db").select("slug, title, file_hash").eq("file_hash", file_hash).limit(1).execute()
+            if res_hash.data and len(res_hash.data) > 0:
+                match = res_hash.data[0]
+                return True, f"SHA-256 hash matched in Supabase with slug '{match.get('slug')}' ({match.get('title')})"
+
+        # Layer 2: Check matching File Size & Duration (within 0.15s tolerance)
+        if file_size and file_size > 0 and duration and duration > 0:
+            res_size = client.table("all_videos_db").select("slug, title, file_size, duration").eq("file_size", file_size).execute()
+            if res_size.data:
+                for row in res_size.data:
+                    row_dur = row.get("duration")
+                    if row_dur is not None and abs(float(row_dur) - float(duration)) < 0.15:
+                        return True, f"File size ({file_size} B) & duration ({duration:.2f}s) matched in Supabase with slug '{row.get('slug')}' ({row.get('title')})"
+
+    except Exception as e:
+        log(f"[Supabase Duplicate Check Warning] {e}")
+
+    return False, ""
+
 def supabase_insert_video(record: dict):
     """
     Saves video details to Supabase all_videos_db table, including file_hash, file_size, and duration.

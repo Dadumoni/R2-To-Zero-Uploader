@@ -8,6 +8,7 @@ from utils.media import make_title_and_filename, generate_smart_thumbnail, get_v
 from db.mongo import calculate_file_hash, mongo_check_duplicate, mongo_save_video_hash
 from db.supabase_db import (
     supabase_get_next_slug,
+    supabase_check_duplicate,
     supabase_insert_video,
 )
 from storage.r2 import (
@@ -52,8 +53,10 @@ def process_video(s3, video: dict, temp_dir: Path, processed_titles: set) -> boo
         log(f"File Hash: {file_hash}")
         log(f"File Size: {file_size / 1024 / 1024:.2f} MB, Duration: {duration:.2f}s")
 
-        # Step 3: Tagda Duplicate Check using MongoDB (SHA-256 Hash + Size & Duration)
-        is_dup, reason = mongo_check_duplicate(file_hash, file_size, duration)
+        # Step 3: Bulletproof Duplicate Check (Supabase Cloud DB + MongoDB Cache)
+        is_dup, reason = supabase_check_duplicate(file_hash, file_size, duration)
+        if not is_dup:
+            is_dup, reason = mongo_check_duplicate(file_hash, file_size, duration)
 
         if is_dup:
             log(f"⚠ [DUPLICATE DETECTED] {reason}")
