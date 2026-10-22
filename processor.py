@@ -14,6 +14,7 @@ from storage.r2 import (
     download_from_r2,
     delete_from_r2,
     move_to_duplicate_folder,
+    move_to_uploaded_folder,
     upload_thumb_to_r2,
 )
 from uploaders import upload_anonmp4_with_retry, upload_abyss, upload_zerostorage
@@ -133,17 +134,18 @@ def process_video(s3, video: dict, temp_dir: Path, processed_titles: set) -> boo
         # Step 7: Save file hash and metadata in MongoDB for future deduplication
         mongo_save_video_hash(file_hash, slug, new_filename, file_size, duration)
 
-        # Step 8: Cleanup local file & remove original from R2 watch folder
+        # Step 8: Cleanup local file & move original in R2 to 'uploaded-files/' folder (NO DELETION)
         if local_file.exists():
             local_file.unlink()
 
-        delete_from_r2(s3, key)
+        move_to_uploaded_folder(s3, key)
         gc.collect()
-        log("✔ COMPLETED SUCCESSFULLY")
+        log("✔ COMPLETED AND MOVED TO 'uploaded-files/' SUCCESSFULLY")
         return True
 
     except Exception as e:
         log(f"✖ FAILED: {e}\n{traceback.format_exc()}")
+        log(f"⚠ Video '{orig_name}' remains in watch folder for re-upload.")
         if local_file.exists():
             local_file.unlink()
         gc.collect()

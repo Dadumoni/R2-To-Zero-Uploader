@@ -19,15 +19,18 @@ Automated cloud video processing pipeline designed for 24/7 background operation
 4. **Dedicated Thumbnail R2 Account**:
    - Supports uploading thumbnails to a **separate Cloudflare R2 account / bucket**.
    - Uploads to folder `new-thumbnail/` (e.g. `new-thumbnail/{slug}_thumb.webp`).
-5. **Platform Uploaders (Zero-Memory Streamed)**:
+5. **No File Deletion - Moved to `uploaded-files/`**:
+   - Once successfully uploaded to all platforms, original video is moved to `uploaded-files/` in R2 instead of deletion.
+   - If any platform fails during upload, the video is kept in `uploads/` for automatic re-upload/retry.
+6. **Platform Uploaders (Zero-Memory Streamed)**:
    - **ZeroStorage**: 2MB chunked upload with UUID session tracking.
    - **Abyss**: Streamed multipart upload (prevents memory OOM issues).
    - **AnonMP4**: Headless Chromium Playwright automation with link retrieval.
-6. **Supabase Integration**:
-   - Stores metadata in `all_videos_db` (`slug`, `title`, `thumbnail`, `video_link`, `zerostorage`, `abyss`, `anonmp4`).
+7. **Supabase Integration**:
+   - Stores metadata in `all_videos_db` (`slug`, `title`, `thumbnail`, `video_link`, `zerostorage`, `abyss`, `anonmp4`, `file_hash`, `file_size`, `duration`).
    - Automatically generates random 12-15 character unique alphanumeric slugs (e.g. `hjb8SNrKg_s8enRo`).
-7. **Auto-Ping Keep-Alive**: Background thread pings `APP_URL/health` every 10 minutes to prevent Koyeb containers from idling or sleeping.
-8. **Koyeb Ready**: Includes Debian 12 Bookworm Dockerfile with FFmpeg, Playwright Chromium, and Flask health server on port `8000`.
+8. **Auto-Ping Keep-Alive**: Background thread pings `APP_URL/health` every 10 minutes to prevent Koyeb containers from idling or sleeping.
+9. **Koyeb Ready**: Includes Debian 12 Bookworm Dockerfile with FFmpeg, Playwright Chromium, and Flask health server on port `8000`.
 
 ---
 
@@ -44,6 +47,7 @@ R2_BUCKET=your_main_video_bucket
 R2_PUBLIC_URL=https://pub-xxxxxx.r2.dev
 R2_WATCH_FOLDER=uploads/
 R2_DUPLICATE_FOLDER=Duplickte files/
+R2_UPLOADED_FOLDER=uploaded-files/
 
 # Cloudflare R2 - Separate Dedicated Thumbnail Account & Bucket
 THUMB_R2_ENDPOINT=https://<thumb-account-id>.r2.cloudflarestorage.com

@@ -11,6 +11,7 @@ R2_BUCKET = os.getenv("R2_BUCKET")
 R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
 R2_WATCH_FOLDER = os.getenv("R2_WATCH_FOLDER", "uploads/")
 R2_DUPLICATE_FOLDER = os.getenv("R2_DUPLICATE_FOLDER", "Duplickte files/")
+R2_UPLOADED_FOLDER = os.getenv("R2_UPLOADED_FOLDER", "uploaded-files/")
 
 # Cloudflare R2 - Dedicated Thumbnail Account / Bucket
 THUMB_R2_ENDPOINT = os.getenv("THUMB_R2_ENDPOINT") or R2_ENDPOINT

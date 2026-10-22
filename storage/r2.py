@@ -9,6 +9,7 @@ from config import (
     R2_PUBLIC_URL,
     R2_WATCH_FOLDER,
     R2_DUPLICATE_FOLDER,
+    R2_UPLOADED_FOLDER,
     THUMB_R2_ENDPOINT,
     THUMB_R2_ACCESS_KEY,
     THUMB_R2_SECRET_KEY,
@@ -69,6 +70,27 @@ def list_videos(s3):
 def delete_from_r2(s3, key: str):
     log(f"Deleting original video from R2: {key}")
     s3.delete_object(Bucket=R2_BUCKET, Key=key)
+
+def move_to_uploaded_folder(s3, key: str) -> str:
+    """
+    Moves successfully uploaded video from the watch folder to 'uploaded-files/' folder in R2 (No deletion).
+    """
+    folder = R2_UPLOADED_FOLDER.strip()
+    if folder and not folder.endswith("/"):
+        folder += "/"
+
+    file_name = Path(key).name
+    target_key = f"{folder}{file_name}"
+
+    log(f"Moving uploaded video in R2: '{key}' -> '{target_key}'")
+    s3.copy_object(
+        Bucket=R2_BUCKET,
+        CopySource={"Bucket": R2_BUCKET, "Key": key},
+        Key=target_key,
+    )
+    s3.delete_object(Bucket=R2_BUCKET, Key=key)
+    log(f"Video successfully moved to '{target_key}'.")
+    return target_key
 
 def move_to_duplicate_folder(s3, key: str) -> str:
     """

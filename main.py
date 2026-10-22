@@ -41,6 +41,9 @@ def main():
                 ok = process_video(s3, video, temp_dir, processed_titles)
                 if ok:
                     already_done.add(video["key"])
+                else:
+                    # If any platform failed, ensure key is NOT marked done so it retries
+                    already_done.discard(video["key"])
                 gc.collect()
 
             main._processed_keys = already_done
