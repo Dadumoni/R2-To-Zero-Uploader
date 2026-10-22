@@ -8,6 +8,7 @@ from utils.logger import log
 
 CANVAS_WIDTH = 1920
 CANVAS_HEIGHT = 1080
+WEBP_QUALITY = 82  # Optimal balance between ultra-compact size and crystal-clear visual fidelity
 
 def make_rename(ext: str) -> str:
     ts = datetime.now().strftime("%d%m%y%H%M%S")
@@ -102,7 +103,7 @@ def fit_image_with_blurred_bg(img: Image.Image, target_w: int, target_h: int) ->
 
 def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Path:
     """
-    Generates a dynamic 16:9 composite thumbnail based on video aspect ratio:
+    Generates a compressed WebP 16:9 composite thumbnail based on video aspect ratio:
     - 9:16 (Ratio < 0.8) -> 3 equal parts, 3 frames side-by-side vertical panels (Ref Image 1)
     - 16:9 (Ratio >= 1.5) -> 4 equal parts, 2x2 grid (Ref Image 2)
     - Other (4:3, 3:4, etc.) -> 6 equal parts, 3x2 grid with sleek cards (Ref Image 3)
@@ -111,7 +112,7 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
     duration = info["duration"]
     ratio = info["aspect_ratio"]
 
-    output_path = temp_dir / f"{slug}_composite_thumb.jpg"
+    output_path = temp_dir / f"{slug}_composite_thumb.webp"
     log(f"[Thumbnail] Detected Resolution: {info['width']}x{info['height']} (Ratio: {ratio:.2f}), Duration: {duration:.2f}s")
 
     effective_dur = duration if duration > 1.0 else 30.0
@@ -159,8 +160,10 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
         draw.rectangle([(col_w, 0), (col_w + divider_w, col_h)], fill=(0, 0, 0))
         draw.rectangle([(2 * col_w + divider_w, 0), (2 * col_w + 2 * divider_w, col_h)], fill=(0, 0, 0))
 
-        canvas.save(output_path, "JPEG", quality=95)
-        log(f"[Thumbnail] 9:16 Composite generated: {output_path.name}")
+        # Save compressed WebP
+        canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
+        size_kb = output_path.stat().st_size / 1024
+        log(f"[Thumbnail] 9:16 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
         return output_path
 
     # =========================================================================
@@ -213,8 +216,10 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
         draw.rectangle([(cell_w, 0), (cell_w + divider, CANVAS_HEIGHT)], fill=(0, 0, 0))
         draw.rectangle([(0, cell_h), (CANVAS_WIDTH, cell_h + divider)], fill=(0, 0, 0))
 
-        canvas.save(output_path, "JPEG", quality=95)
-        log(f"[Thumbnail] 16:9 Composite generated: {output_path.name}")
+        # Save compressed WebP
+        canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
+        size_kb = output_path.stat().st_size / 1024
+        log(f"[Thumbnail] 16:9 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
         return output_path
 
     # =========================================================================
@@ -274,6 +279,8 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
 
             canvas.paste(card, positions[idx])
 
-        canvas.save(output_path, "JPEG", quality=95)
-        log(f"[Thumbnail] 3x2 Composite generated: {output_path.name}")
+        # Save compressed WebP
+        canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
+        size_kb = output_path.stat().st_size / 1024
+        log(f"[Thumbnail] 3x2 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
         return output_path

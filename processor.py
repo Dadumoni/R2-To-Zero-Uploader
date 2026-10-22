@@ -62,7 +62,7 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
         thumb_path = generate_smart_thumbnail(local_file, slug, temp_dir)
         thumb_url = None
         if thumb_path and thumb_path.exists():
-            thumb_url = upload_thumb_to_r2(s3, thumb_path, slug)
+            thumb_url = upload_thumb_to_r2(thumb_path, slug)
             thumb_path.unlink()
             log(f"✔ Thumbnail Uploaded: {thumb_url}")
 

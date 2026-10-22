@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Cloudflare R2
+# Cloudflare R2 - Main Video Account / Bucket
 R2_ENDPOINT = os.getenv("R2_ENDPOINT")
 R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
 R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
@@ -11,6 +11,14 @@ R2_BUCKET = os.getenv("R2_BUCKET")
 R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
 R2_WATCH_FOLDER = os.getenv("R2_WATCH_FOLDER", "uploads/")
 R2_DUPLICATE_FOLDER = os.getenv("R2_DUPLICATE_FOLDER", "Duplickte files/")
+
+# Cloudflare R2 - Dedicated Thumbnail Account / Bucket
+THUMB_R2_ENDPOINT = os.getenv("THUMB_R2_ENDPOINT") or R2_ENDPOINT
+THUMB_R2_ACCESS_KEY = os.getenv("THUMB_R2_ACCESS_KEY") or R2_ACCESS_KEY
+THUMB_R2_SECRET_KEY = os.getenv("THUMB_R2_SECRET_KEY") or R2_SECRET_KEY
+THUMB_R2_BUCKET = os.getenv("THUMB_R2_BUCKET") or R2_BUCKET
+THUMB_R2_PUBLIC_URL = os.getenv("THUMB_R2_PUBLIC_URL", "").rstrip("/") or R2_PUBLIC_URL
+THUMB_FOLDER = os.getenv("THUMB_FOLDER", "new-thumbnail/").strip()
 
 # Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
