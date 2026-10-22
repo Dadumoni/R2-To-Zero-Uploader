@@ -1,25 +1,15 @@
-FROM python:3.10-slim-bullseye
+FROM python:3.11-slim-bookworm
 
-# Prevent python from buffering stdout/stderr
+# Prevent python from buffering stdout/stderr and configure default Koyeb port
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    PORT=8080
+    PORT=8000
 
-# Install system dependencies including ffmpeg and required libraries for Chromium
+# Install ffmpeg, curl, and ca-certificates (Debian 12 Bookworm)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     ca-certificates \
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -30,14 +20,14 @@ COPY requirements.txt .
 # Install python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium browser binary and its OS dependencies
+# Install Playwright Chromium browser binary and its exact required OS dependencies
 RUN playwright install --with-deps chromium
 
 # Copy application source code
 COPY . .
 
-# Expose port (Railway will bind to $PORT)
-EXPOSE 8080
+# Expose port (Koyeb default: 8000)
+EXPOSE 8000
 
 # Run main processor
 CMD ["python", "main.py"]

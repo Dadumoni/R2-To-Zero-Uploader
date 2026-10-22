@@ -1,6 +1,6 @@
 # R2 To Zero Uploader
 
-Automated cloud video processing pipeline designed for 24/7 background operation and deployment on **Railway / Docker**.
+Automated cloud video processing pipeline designed for 24/7 background operation and deployment on **Koyeb / Docker**.
 
 ---
 
@@ -9,7 +9,7 @@ Automated cloud video processing pipeline designed for 24/7 background operation
 1. **R2 Watch & Auto Download**: Monitors Cloudflare R2 bucket watch folder for incoming videos.
 2. **Robust Multi-Layer Deduplication**:
    - SHA-256 full file hash calculation.
-   - Secondary fingerprinting (file size & duration tolerance).
+   - Secondary fingerprinting (file size & duration tolerance) via MongoDB.
    - If a duplicate video is found, it is moved automatically to the `Duplickte files/` folder in R2 and skipped.
 3. **Smart Aspect-Ratio Thumbnails (16:9 1920x1080)**:
    - **9:16 (Vertical/Portrait/Shorts)**: Splits video into 3 equal parts, extracts frames, and composites into a 3-panel 16:9 thumbnail with dark dividers.
@@ -20,15 +20,16 @@ Automated cloud video processing pipeline designed for 24/7 background operation
    - **Abyss**: Streamed multipart upload (prevents memory OOM issues).
    - **AnonMP4**: Headless Chromium Playwright automation with link retrieval.
 5. **Supabase Integration**:
-   - Stores metadata in `all_videos_db` (`slug`, `title`, `thumbnail`, `video_link`, `zerostorage`, `abyss`, `anonmp4`, `file_hash`, `file_size`, `duration`).
-   - Automatically increments unique slugs (`vid000000000001`, ...).
-6. **Railway Ready**: Includes Dockerfile with `ffmpeg`, Playwright Chromium, and Flask health server on port `$PORT`.
+   - Stores metadata in `all_videos_db` (`slug`, `title`, `thumbnail`, `video_link`, `zerostorage`, `abyss`, `anonmp4`).
+   - Automatically generates random 12-15 character unique alphanumeric slugs (e.g. `hjb8SNrKg_s8enRo`).
+6. **Auto-Ping Keep-Alive**: Background thread pings `APP_URL/health` every 10 minutes to prevent Koyeb containers from idling or sleeping.
+7. **Koyeb Ready**: Includes Debian 12 Bookworm Dockerfile with FFmpeg, Playwright Chromium, and Flask health server on port `8000`.
 
 ---
 
 ## 🛠️ Environment Variables (.env)
 
-Configure the following variables in Railway or local `.env`:
+Configure the following variables in Koyeb or local `.env`:
 
 ```env
 # Cloudflare R2
@@ -47,19 +48,25 @@ SUPABASE_KEY=your_supabase_service_role_or_anon_key
 # ZeroStorage
 ZEROSTORAGE_API_KEY=your_zerostorage_api_key
 
-# Optional
-MONGO_URI=mongodb://localhost:27017
+# MongoDB
+MONGO_URI=mongodb+srv://...
 MONGO_DB_NAME=video_bot_db
-PORT=8080
+
+# Koyeb & Auto-Ping
+PORT=8000
+APP_URL=https://<your-app-name>.koyeb.app
+PING_INTERVAL=600
 ```
 
 ---
 
-## 🚀 Railway Deployment
+## 🚀 Koyeb Deployment
 
-1. Connect your GitHub repository `Dadumoni/R2-To-Zero-Uploader` in [Railway](https://railway.app/).
-2. Add your environment variables in the Railway dashboard under **Variables**.
-3. Railway will automatically detect the `Dockerfile` and build:
-   - Python 3.10 environment
-   - FFmpeg & Playwright Chromium
-   - Health check server bound to `$PORT`
+1. Login to [Koyeb.com](https://www.koyeb.com/).
+2. Click **Create Service** > select **GitHub**.
+3. Choose your repository: **`Dadumoni/R2-To-Zero-Uploader`**.
+4. In the build settings:
+   - **Builder:** Dockerfile (Auto-detected).
+   - **Port:** `8000` (Protocol: HTTP, Path: `/health`).
+5. In **Environment variables**, add all the `.env` values above (including `APP_URL` with your Koyeb public URL).
+6. Click **Deploy**.
