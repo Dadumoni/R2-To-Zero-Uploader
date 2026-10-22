@@ -1,5 +1,8 @@
+import gc
 import traceback
 from pathlib import Path
+from playwright.sync_api import sync_playwright
+
 from utils.logger import log
 from utils.media import make_title_and_filename, generate_smart_thumbnail, get_video_duration
 from db.mongo import calculate_file_hash, mongo_check_duplicate, mongo_save_video_hash
@@ -15,7 +18,7 @@ from storage.r2 import (
 )
 from uploaders import upload_anonmp4_with_retry, upload_abyss, upload_zerostorage
 
-def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) -> bool:
+def process_video(s3, video: dict, temp_dir: Path, processed_titles: set) -> bool:
     key       = video["key"]
     orig_ext  = Path(key).suffix.lower()
     orig_name = Path(key).name
@@ -57,6 +60,7 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
             move_to_duplicate_folder(s3, key)
             if local_file.exists():
                 local_file.unlink()
+            gc.collect()
             return True
 
         # Step 4: Generate Smart Composite Thumbnail based on Aspect Ratio
@@ -67,19 +71,49 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
             thumb_url = upload_thumb_to_r2(thumb_path, slug)
             thumb_path.unlink()
             log(f"✔ Thumbnail Uploaded: {thumb_url}")
+        gc.collect()
 
         # Step 5: Upload to Platforms (Untouched upload functions)
-        log("[AnonMP4] Starting upload...")
-        anon_url = upload_anonmp4_with_retry(page, local_file)
+        # Launch lightweight Chromium ON-DEMAND only for AnonMP4 and close immediately to save 400MB RAM!
+        log("[AnonMP4] Launching lightweight browser on-demand...")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--no-zygote",
+                    "--single-process",
+                    "--disable-extensions",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                    "--disable-sync",
+                    "--mute-audio",
+                    "--no-first-run",
+                    "--hide-scrollbars",
+                ]
+            )
+            context = browser.new_context(accept_downloads=True)
+            page = context.new_page()
+            try:
+                anon_url = upload_anonmp4_with_retry(page, local_file)
+            finally:
+                context.close()
+                browser.close()
         log(f"✔ AnonMP4: {anon_url}")
+        gc.collect()
 
         log("[Abyss] Starting upload...")
         abyss_url = upload_abyss(local_file)
         log(f"✔ Abyss: {abyss_url}")
+        gc.collect()
 
         log("[ZeroStorage] Starting upload...")
         zs_embed, zs_video = upload_zerostorage(local_file)
         log(f"✔ ZS Video: {zs_video}")
+        gc.collect()
 
         # Step 6: Save record in Supabase all_videos_db (including file_hash, file_size, duration)
         record = {
@@ -104,6 +138,7 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
             local_file.unlink()
 
         delete_from_r2(s3, key)
+        gc.collect()
         log("✔ COMPLETED SUCCESSFULLY")
         return True
 
@@ -111,4 +146,5 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
         log(f"✖ FAILED: {e}\n{traceback.format_exc()}")
         if local_file.exists():
             local_file.unlink()
+        gc.collect()
         return False

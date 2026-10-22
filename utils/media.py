@@ -1,3 +1,4 @@
+import gc
 import json
 import math
 import subprocess
@@ -27,10 +28,11 @@ def make_rename(ext: str) -> str:
 
 def get_video_info(video_path: Path) -> dict:
     """
-    Extracts video width, height, duration and file size using ffprobe.
+    Extracts video width, height, duration and file size using ffprobe (limited to 1 thread for low CPU).
     """
     cmd = [
         "ffprobe", "-v", "error",
+        "-threads", "1",
         "-select_streams", "v:0",
         "-show_entries", "stream=width,height,duration",
         "-show_entries", "format=duration,size",
@@ -75,11 +77,12 @@ def get_video_duration(video_path: Path) -> float:
 
 def extract_frame_at(video_path: Path, timestamp: float, output_path: Path) -> bool:
     """
-    Extracts a single frame from video at given timestamp using ffmpeg.
+    Extracts a single frame from video at given timestamp using ffmpeg (fast seek & single-threaded for minimal CPU).
     """
     time_str = f"{max(0.0, timestamp):.3f}"
     cmd = [
         "ffmpeg", "-y",
+        "-threads", "1",
         "-ss", time_str,
         "-i", str(video_path),
         "-vframes", "1",
@@ -127,171 +130,190 @@ def generate_smart_thumbnail(video_path: Path, slug: str, temp_dir: Path) -> Pat
     log(f"[Thumbnail] Detected Resolution: {info['width']}x{info['height']} (Ratio: {ratio:.2f}), Duration: {duration:.2f}s")
 
     effective_dur = duration if duration > 1.0 else 30.0
+    frame_imgs = []
 
-    # =========================================================================
-    # CASE 1: 9:16 Ratio (Portrait / Shorts / Vertical Videos) -> 3 Panels (Ref 1)
-    # =========================================================================
-    if ratio < 0.8:
-        log("[Thumbnail] Mode: 9:16 Ratio -> Creating 3-Panel Side-by-Side Thumbnail (16:9)")
-        part = effective_dur / 3.0
-        timestamps = [
-            0.1 * part,
-            part + 0.1 * part,
-            2.0 * part + 0.1 * part,
-        ]
+    try:
+        # =========================================================================
+        # CASE 1: 9:16 Ratio (Portrait / Shorts / Vertical Videos) -> 3 Panels (Ref 1)
+        # =========================================================================
+        if ratio < 0.8:
+            log("[Thumbnail] Mode: 9:16 Ratio -> Creating 3-Panel Side-by-Side Thumbnail (16:9)")
+            part = effective_dur / 3.0
+            timestamps = [
+                0.1 * part,
+                part + 0.1 * part,
+                2.0 * part + 0.1 * part,
+            ]
 
-        frame_imgs = []
-        for i, ts in enumerate(timestamps):
-            frame_file = temp_dir / f"{slug}_f916_{i}.jpg"
-            if extract_frame_at(video_path, ts, frame_file):
-                try:
-                    frame_imgs.append(Image.open(frame_file).convert("RGB"))
-                except Exception:
-                    pass
+            for i, ts in enumerate(timestamps):
+                frame_file = temp_dir / f"{slug}_f916_{i}.jpg"
+                if extract_frame_at(video_path, ts, frame_file):
+                    try:
+                        frame_imgs.append(Image.open(frame_file).convert("RGB"))
+                    except Exception:
+                        pass
+                if frame_file.exists():
+                    frame_file.unlink()
 
-        if not frame_imgs:
-            frame_file = temp_dir / f"{slug}_fallback.jpg"
-            extract_frame_at(video_path, 0.0, frame_file)
-            if frame_file.exists():
-                frame_imgs = [Image.open(frame_file).convert("RGB")] * 3
+            if not frame_imgs:
+                frame_file = temp_dir / f"{slug}_fallback.jpg"
+                extract_frame_at(video_path, 0.0, frame_file)
+                if frame_file.exists():
+                    frame_imgs = [Image.open(frame_file).convert("RGB")] * 3
+                    frame_file.unlink()
 
-        canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=(0, 0, 0))
-        divider_w = 8
-        col_w = (CANVAS_WIDTH - (2 * divider_w)) // 3
-        col_h = CANVAS_HEIGHT
+            canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=(0, 0, 0))
+            divider_w = 8
+            col_w = (CANVAS_WIDTH - (2 * divider_w)) // 3
+            col_h = CANVAS_HEIGHT
 
-        for idx in range(3):
-            img = frame_imgs[idx % len(frame_imgs)]
-            cropped = ImageOps.fit(img, (col_w, col_h), method=Image.Resampling.LANCZOS)
-            x_pos = idx * (col_w + divider_w)
-            canvas.paste(cropped, (x_pos, 0))
+            for idx in range(3):
+                img = frame_imgs[idx % len(frame_imgs)]
+                cropped = ImageOps.fit(img, (col_w, col_h), method=Image.Resampling.LANCZOS)
+                x_pos = idx * (col_w + divider_w)
+                canvas.paste(cropped, (x_pos, 0))
+                cropped.close()
 
-        # Explicitly ensure clean black divider lines using 2-point tuple coordinates [(x0, y0), (x1, y1)]
-        draw = ImageDraw.Draw(canvas)
-        draw.rectangle([(col_w, 0), (col_w + divider_w, col_h)], fill=(0, 0, 0))
-        draw.rectangle([(2 * col_w + divider_w, 0), (2 * col_w + 2 * divider_w, col_h)], fill=(0, 0, 0))
+            # Explicitly ensure clean black divider lines using 2-point tuple coordinates [(x0, y0), (x1, y1)]
+            draw = ImageDraw.Draw(canvas)
+            draw.rectangle([(col_w, 0), (col_w + divider_w, col_h)], fill=(0, 0, 0))
+            draw.rectangle([(2 * col_w + divider_w, 0), (2 * col_w + 2 * divider_w, col_h)], fill=(0, 0, 0))
 
-        # Save compressed WebP
-        canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
-        size_kb = output_path.stat().st_size / 1024
-        log(f"[Thumbnail] 9:16 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
-        return output_path
+            canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
+            canvas.close()
+            size_kb = output_path.stat().st_size / 1024
+            log(f"[Thumbnail] 9:16 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
+            return output_path
 
-    # =========================================================================
-    # CASE 2: 16:9 Ratio (Landscape / Widescreen Videos) -> 4 Panels 2x2 Grid (Ref 2)
-    # =========================================================================
-    elif ratio >= 1.5:
-        log("[Thumbnail] Mode: 16:9 Ratio -> Creating 2x2 Grid Thumbnail (4 Frames, Ref 2)")
-        part = effective_dur / 4.0
-        timestamps = [
-            0.1 * part,
-            part + 0.1 * part,
-            2.0 * part + 0.1 * part,
-            3.0 * part + 0.1 * part,
-        ]
+        # =========================================================================
+        # CASE 2: 16:9 Ratio (Landscape / Widescreen Videos) -> 4 Panels 2x2 Grid (Ref 2)
+        # =========================================================================
+        elif ratio >= 1.5:
+            log("[Thumbnail] Mode: 16:9 Ratio -> Creating 2x2 Grid Thumbnail (4 Frames, Ref 2)")
+            part = effective_dur / 4.0
+            timestamps = [
+                0.1 * part,
+                part + 0.1 * part,
+                2.0 * part + 0.1 * part,
+                3.0 * part + 0.1 * part,
+            ]
 
-        frame_imgs = []
-        for i, ts in enumerate(timestamps):
-            frame_file = temp_dir / f"{slug}_f169_{i}.jpg"
-            if extract_frame_at(video_path, ts, frame_file):
-                try:
-                    frame_imgs.append(Image.open(frame_file).convert("RGB"))
-                except Exception:
-                    pass
+            for i, ts in enumerate(timestamps):
+                frame_file = temp_dir / f"{slug}_f169_{i}.jpg"
+                if extract_frame_at(video_path, ts, frame_file):
+                    try:
+                        frame_imgs.append(Image.open(frame_file).convert("RGB"))
+                    except Exception:
+                        pass
+                if frame_file.exists():
+                    frame_file.unlink()
 
-        if not frame_imgs:
-            frame_file = temp_dir / f"{slug}_fallback.jpg"
-            extract_frame_at(video_path, 0.0, frame_file)
-            if frame_file.exists():
-                frame_imgs = [Image.open(frame_file).convert("RGB")] * 4
+            if not frame_imgs:
+                frame_file = temp_dir / f"{slug}_fallback.jpg"
+                extract_frame_at(video_path, 0.0, frame_file)
+                if frame_file.exists():
+                    frame_imgs = [Image.open(frame_file).convert("RGB")] * 4
+                    frame_file.unlink()
 
-        canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=(0, 0, 0))
-        divider = 8
-        cell_w = (CANVAS_WIDTH - divider) // 2
-        cell_h = (CANVAS_HEIGHT - divider) // 2
+            canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=(0, 0, 0))
+            divider = 8
+            cell_w = (CANVAS_WIDTH - divider) // 2
+            cell_h = (CANVAS_HEIGHT - divider) // 2
 
-        coords = [
-            (0, 0),
-            (cell_w + divider, 0),
-            (0, cell_h + divider),
-            (cell_w + divider, cell_h + divider),
-        ]
+            coords = [
+                (0, 0),
+                (cell_w + divider, 0),
+                (0, cell_h + divider),
+                (cell_w + divider, cell_h + divider),
+            ]
 
-        for idx in range(4):
-            img = frame_imgs[idx % len(frame_imgs)]
-            cropped = ImageOps.fit(img, (cell_w, cell_h), method=Image.Resampling.LANCZOS)
-            canvas.paste(cropped, coords[idx])
+            for idx in range(4):
+                img = frame_imgs[idx % len(frame_imgs)]
+                cropped = ImageOps.fit(img, (cell_w, cell_h), method=Image.Resampling.LANCZOS)
+                canvas.paste(cropped, coords[idx])
+                cropped.close()
 
-        # Draw grid dividing cross with 2-point tuple coordinates [(x0, y0), (x1, y1)]
-        draw = ImageDraw.Draw(canvas)
-        draw.rectangle([(cell_w, 0), (cell_w + divider, CANVAS_HEIGHT)], fill=(0, 0, 0))
-        draw.rectangle([(0, cell_h), (CANVAS_WIDTH, cell_h + divider)], fill=(0, 0, 0))
+            # Draw grid dividing cross with 2-point tuple coordinates [(x0, y0), (x1, y1)]
+            draw = ImageDraw.Draw(canvas)
+            draw.rectangle([(cell_w, 0), (cell_w + divider, CANVAS_HEIGHT)], fill=(0, 0, 0))
+            draw.rectangle([(0, cell_h), (CANVAS_WIDTH, cell_h + divider)], fill=(0, 0, 0))
 
-        # Save compressed WebP
-        canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
-        size_kb = output_path.stat().st_size / 1024
-        log(f"[Thumbnail] 16:9 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
-        return output_path
+            canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
+            canvas.close()
+            size_kb = output_path.stat().st_size / 1024
+            log(f"[Thumbnail] 16:9 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
+            return output_path
 
-    # =========================================================================
-    # CASE 3: Other Ratios (4:3, 3:4, 1:1, etc.) -> 6 Panels 3x2 Grid (Ref 3)
-    # =========================================================================
-    else:
-        log("[Thumbnail] Mode: Other Ratio -> Creating 3x2 Grid Thumbnail (6 Frames, Ref 3)")
-        part = effective_dur / 6.0
-        timestamps = [
-            0.1 * part,
-            1.0 * part + 0.1 * part,
-            2.0 * part + 0.1 * part,
-            3.0 * part + 0.1 * part,
-            4.0 * part + 0.1 * part,
-            5.0 * part + 0.1 * part,
-        ]
+        # =========================================================================
+        # CASE 3: Other Ratios (4:3, 3:4, 1:1, etc.) -> 6 Panels 3x2 Grid (Ref 3)
+        # =========================================================================
+        else:
+            log("[Thumbnail] Mode: Other Ratio -> Creating 3x2 Grid Thumbnail (6 Frames, Ref 3)")
+            part = effective_dur / 6.0
+            timestamps = [
+                0.1 * part,
+                1.0 * part + 0.1 * part,
+                2.0 * part + 0.1 * part,
+                3.0 * part + 0.1 * part,
+                4.0 * part + 0.1 * part,
+                5.0 * part + 0.1 * part,
+            ]
 
-        frame_imgs = []
-        for i, ts in enumerate(timestamps):
-            frame_file = temp_dir / f"{slug}_fother_{i}.jpg"
-            if extract_frame_at(video_path, ts, frame_file):
-                try:
-                    frame_imgs.append(Image.open(frame_file).convert("RGB"))
-                except Exception:
-                    pass
+            for i, ts in enumerate(timestamps):
+                frame_file = temp_dir / f"{slug}_fother_{i}.jpg"
+                if extract_frame_at(video_path, ts, frame_file):
+                    try:
+                        frame_imgs.append(Image.open(frame_file).convert("RGB"))
+                    except Exception:
+                        pass
+                if frame_file.exists():
+                    frame_file.unlink()
 
-        if not frame_imgs:
-            frame_file = temp_dir / f"{slug}_fallback.jpg"
-            extract_frame_at(video_path, 0.0, frame_file)
-            if frame_file.exists():
-                frame_imgs = [Image.open(frame_file).convert("RGB")] * 6
+            if not frame_imgs:
+                frame_file = temp_dir / f"{slug}_fallback.jpg"
+                extract_frame_at(video_path, 0.0, frame_file)
+                if frame_file.exists():
+                    frame_imgs = [Image.open(frame_file).convert("RGB")] * 6
+                    frame_file.unlink()
 
-        bg_color = (20, 24, 33)
-        canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=bg_color)
+            bg_color = (20, 24, 33)
+            canvas = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), color=bg_color)
 
-        pad_x = 24
-        pad_y = 20
-        gap = 16
-        card_w = (CANVAS_WIDTH - (2 * pad_x) - (2 * gap)) // 3
-        card_h = (CANVAS_HEIGHT - (2 * pad_y) - (1 * gap)) // 2
+            pad_x = 24
+            pad_y = 20
+            gap = 16
+            card_w = (CANVAS_WIDTH - (2 * pad_x) - (2 * gap)) // 3
+            card_h = (CANVAS_HEIGHT - (2 * pad_y) - (1 * gap)) // 2
 
-        positions = [
-            (pad_x + 0 * (card_w + gap), pad_y + 0 * (card_h + gap)),
-            (pad_x + 1 * (card_w + gap), pad_y + 0 * (card_h + gap)),
-            (pad_x + 2 * (card_w + gap), pad_y + 0 * (card_h + gap)),
-            (pad_x + 0 * (card_w + gap), pad_y + 1 * (card_h + gap)),
-            (pad_x + 1 * (card_w + gap), pad_y + 1 * (card_h + gap)),
-            (pad_x + 2 * (card_w + gap), pad_y + 1 * (card_h + gap)),
-        ]
+            positions = [
+                (pad_x + 0 * (card_w + gap), pad_y + 0 * (card_h + gap)),
+                (pad_x + 1 * (card_w + gap), pad_y + 0 * (card_h + gap)),
+                (pad_x + 2 * (card_w + gap), pad_y + 0 * (card_h + gap)),
+                (pad_x + 0 * (card_w + gap), pad_y + 1 * (card_h + gap)),
+                (pad_x + 1 * (card_w + gap), pad_y + 1 * (card_h + gap)),
+                (pad_x + 2 * (card_w + gap), pad_y + 1 * (card_h + gap)),
+            ]
 
-        for idx in range(6):
-            img = frame_imgs[idx % len(frame_imgs)]
-            card = fit_image_with_blurred_bg(img, card_w, card_h)
+            for idx in range(6):
+                img = frame_imgs[idx % len(frame_imgs)]
+                card = fit_image_with_blurred_bg(img, card_w, card_h)
 
-            card_draw = ImageDraw.Draw(card)
-            card_draw.rectangle([(0, 0), (card_w - 1, card_h - 1)], outline=(255, 255, 255), width=3)
+                card_draw = ImageDraw.Draw(card)
+                card_draw.rectangle([(0, 0), (card_w - 1, card_h - 1)], outline=(255, 255, 255), width=3)
 
-            canvas.paste(card, positions[idx])
+                canvas.paste(card, positions[idx])
+                card.close()
 
-        # Save compressed WebP
-        canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
-        size_kb = output_path.stat().st_size / 1024
-        log(f"[Thumbnail] 3x2 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
-        return output_path
+            canvas.save(output_path, "WEBP", quality=WEBP_QUALITY, method=6)
+            canvas.close()
+            size_kb = output_path.stat().st_size / 1024
+            log(f"[Thumbnail] 3x2 Composite WebP generated: {output_path.name} ({size_kb:.1f} KB)")
+            return output_path
+
+    finally:
+        for im in frame_imgs:
+            try:
+                im.close()
+            except Exception:
+                pass
+        gc.collect()
