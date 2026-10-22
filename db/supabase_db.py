@@ -49,8 +49,7 @@ def supabase_get_next_slug() -> str:
 
 def supabase_insert_video(record: dict):
     """
-    Saves video details to Supabase all_videos_db table.
-    Note: file_hash is handled separately in MongoDB.
+    Saves video details to Supabase all_videos_db table, including file_hash, file_size, and duration.
     """
     client = get_supabase_client()
     payload = {
@@ -61,6 +60,9 @@ def supabase_insert_video(record: dict):
         "zerostorage": record.get("zerostorage"),
         "abyss":       record.get("abyss"),
         "anonmp4":     record.get("anonmp4"),
+        "file_hash":   record.get("file_hash"),
+        "file_size":   record.get("file_size"),
+        "duration":    record.get("duration"),
     }
     payload = {k: v for k, v in payload.items() if v is not None}
     

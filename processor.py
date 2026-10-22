@@ -1,7 +1,7 @@
 import traceback
 from pathlib import Path
 from utils.logger import log
-from utils.media import make_rename, generate_smart_thumbnail, get_video_duration
+from utils.media import make_title_and_filename, generate_smart_thumbnail, get_video_duration
 from db.mongo import calculate_file_hash, mongo_check_duplicate, mongo_save_video_hash
 from db.supabase_db import (
     supabase_get_next_slug,
@@ -30,9 +30,11 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
     slug = supabase_get_next_slug()
     log(f"Assigned Slug: {slug}")
 
-    # Video rename before uploading (using original extension)
-    new_name = make_rename(orig_ext)
-    local_file = temp_dir / new_name
+    # Video rename: Title has NO extension, while filename preserves original extension
+    title, new_filename = make_title_and_filename(orig_ext)
+    local_file = temp_dir / new_filename
+    log(f"Assigned Title: {title}")
+    log(f"Local Filename: {new_filename}")
 
     try:
         # Step 1: Download from R2
@@ -79,20 +81,23 @@ def process_video(s3, page, video: dict, temp_dir: Path, processed_titles: set) 
         zs_embed, zs_video = upload_zerostorage(local_file)
         log(f"✔ ZS Video: {zs_video}")
 
-        # Step 6: Save record in Supabase all_videos_db (NO file_hash saved in Supabase)
+        # Step 6: Save record in Supabase all_videos_db (including file_hash, file_size, duration)
         record = {
             "slug":        slug,
-            "title":       new_name,
+            "title":       title,
             "thumbnail":   thumb_url,
             "video_link":  zs_video,
             "zerostorage": zs_embed,
             "abyss":       abyss_url,
             "anonmp4":     anon_url,
+            "file_hash":   file_hash,
+            "file_size":   file_size,
+            "duration":    duration,
         }
         supabase_insert_video(record)
 
         # Step 7: Save file hash and metadata in MongoDB for future deduplication
-        mongo_save_video_hash(file_hash, slug, new_name, file_size, duration)
+        mongo_save_video_hash(file_hash, slug, new_filename, file_size, duration)
 
         # Step 8: Cleanup local file & remove original from R2 watch folder
         if local_file.exists():

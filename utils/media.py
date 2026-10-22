@@ -10,9 +10,20 @@ CANVAS_WIDTH = 1920
 CANVAS_HEIGHT = 1080
 WEBP_QUALITY = 82  # Optimal balance between ultra-compact size and crystal-clear visual fidelity
 
-def make_rename(ext: str) -> str:
+def make_title_and_filename(orig_ext: str) -> tuple[str, str]:
+    """
+    Generates:
+    - title: [TG-@atoz_links]VID-{timestamp} (NO extension, as requested for database title)
+    - filename: [TG-@atoz_links]VID-{timestamp}{orig_ext} (keeps original extension intact for uploaders)
+    """
     ts = datetime.now().strftime("%d%m%y%H%M%S")
-    return f"TG-@atoz_links-VID-{ts}{ext}"
+    title = f"[TG-@atoz_links]VID-{ts}"
+    filename = f"{title}{orig_ext}"
+    return title, filename
+
+def make_rename(ext: str) -> str:
+    _, filename = make_title_and_filename(ext)
+    return filename
 
 def get_video_info(video_path: Path) -> dict:
     """
